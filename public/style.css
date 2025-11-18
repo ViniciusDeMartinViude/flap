@@ -1,0 +1,12 @@
+body { margin:0; font-family:system-ui, Arial, sans-serif; background:#0b0f17; color:#fff; }
+.join { padding:16px; display:flex; gap:8px; justify-content:center; }
+.join input { padding:10px; border-radius:8px; border:none; width:220px; }
+.join button { padding:10px 16px; border-radius:8px; border:none; background:#4b8bf4; color:#fff; }
+#game { display:flex; justify-content:center; margin-top:8px; }
+.grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; padding:12px; }
+.cell { background:#121a26; border:1px solid #1e2a3c; border-radius:16px; padding:12px; min-height:140px; opacity:0.6; }
+.cell.active { opacity:1; box-shadow:0 0 0 2px #2e7dff inset; }
+.header { font-weight:700; margin-bottom:6px; color:#89b4ff; }
+.name { font-size:18px; margin-bottom:8px; }
+.stat { opacity:0.9; }
+@media (max-width: 900px){ .grid { grid-template-columns: repeat(2, 1fr); } }
