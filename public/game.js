@@ -31,11 +31,11 @@ function startGame() {
       default: "arcade",
       arcade: {
         gravity: { y: 1200 },
-        debug: true,
-        debugShowBody: false,        // ❌ no green rectangles
+        debug: false,
+        debugShowBody: false,        // no green rectangles
         debugShowStaticBody: false,
         debugShowBounds: false,
-        debugShowVelocity: true      // ✅ only pink velocity line
+        debugShowVelocity: false      // only pink velocity line
       }
     },
     scene: { preload, create, update }
@@ -45,15 +45,16 @@ function startGame() {
 
   let bird,
     pipes,
-    alive = true,
-    restarting = false,
+    alive = false,        // starts false until you press Start
+    running = false,      // game is not running until Start is pressed
     lastSend = 0,
     bg,
     scoreText,
     highScoreText,
     timeText,
     deathText,
-    newRecordText;
+    newRecordText,
+    startButton;
 
   // Sounds
   let startSound, clickSound, gameOverSound;
@@ -63,15 +64,75 @@ function startGame() {
   let bestSurvivalMs = 0;   // best run (highscore), in ms
   let brokeRecordThisRun = false;
 
+  // ---------- Rounded button helper ----------
+  function createRoundedButton(scene, x, y, text, callback) {
+    const radius = 25;
+    const width = 260;   // fixed width (fits both "START" and "PLAY AGAIN")
+    const height = 80;
+    const bgColor = 0x007bff;
+    const bgHover = 0x005fcc;
+
+    // Create graphics for rounded rectangle
+    const graphics = scene.add.graphics();
+    graphics.fillStyle(bgColor, 1);
+    graphics.fillRoundedRect(0, 0, width, height, radius);
+
+    const textureKey = "button_rect";
+    graphics.generateTexture(textureKey, width, height);
+    graphics.destroy();
+
+    // Create image from texture
+    const button = scene.add.image(x, y, textureKey).setInteractive({ useHandCursor: true });
+    button.setOrigin(0.5);
+
+    // Create label text on top
+    const label = scene.add.text(x, y, text, {
+      fontFamily: "Arial",
+      fontSize: "32px",
+      color: "#ffffff"
+    }).setOrigin(0.5);
+
+    // Attach label + colors for later use
+    button.label = label;
+    button.bgColor = bgColor;
+    button.bgHover = bgHover;
+
+    // Hover effect
+    button.on("pointerover", () => {
+      button.setTint(bgHover);
+    });
+    button.on("pointerout", () => {
+      button.clearTint();
+    });
+
+    // Click handler
+    button.on("pointerdown", callback);
+
+    // Helper to change text later (e.g., "PLAY AGAIN")
+    button.setLabelText = (newText) => {
+      button.label.setText(newText);
+      // keep centered on the button
+      button.label.setPosition(button.x, button.y);
+    };
+
+    // Sync visibility function
+    button.setVisibleWithLabel = (visible) => {
+      button.setVisible(visible);
+      button.label.setVisible(visible);
+    };
+
+    return button;
+  }
+
   function preload() {
     console.log("preload");
     this.load.image("bg", "background.png");
     this.load.image("bird", "carpet.png");
     this.load.image("pipe", "minarete.png");
 
-    // 🎵 Sounds
+    // Sounds
     this.load.audio("start", "arabian_dramatic_sting.wav"); // beginning of run
-    this.load.audio("click", "gameover.wav");                   // flap/click
+    this.load.audio("click", "tick.wav");                   // flap/click
     this.load.audio("gameover", "gameover_retro_3s.wav");   // end game (3s)
   }
 
@@ -121,7 +182,7 @@ function startGame() {
     }).setOrigin(0.5, 0);
 
     // --- Death message (center) ---
-    deathText = this.add.text(W / 2, H / 2, "You Died!", {
+    deathText = this.add.text(W / 2, H / 2 - 60, "GAME OVER!", {
       fontFamily: "Arial",
       fontSize: "64px",
       color: "#ff3333",
@@ -147,17 +208,25 @@ function startGame() {
     clickSound = this.sound.add("click");
     gameOverSound = this.sound.add("gameover");
 
-    // 🔊 Play start sound at the beginning of the run
-    if (startSound) startSound.play();
+    // --- Rounded Start button ---
+    startButton = createRoundedButton(
+      this,
+      W / 2,
+      H / 2 + 40,
+      "START",
+      () => {
+        if (!running) startRun(this);
+      }
+    );
 
-    // Input: click/tap to flap + click sound
+    // Input: click/tap to flap + click sound (only when in a run)
     this.input.on("pointerdown", () => {
-      if (!alive) return; // ignore clicks when dead / waiting
+      if (!alive || !running) return; // ignore clicks when not in a run
       bird.setVelocityY(-380);
       if (clickSound) clickSound.play();
     });
 
-    // Pipe spawner
+    // Pipe spawner (spawn only when running)
     this.time.addEvent({
       delay: 1400,
       loop: true,
@@ -168,8 +237,42 @@ function startGame() {
     this.physics.add.overlap(bird, pipes, () => die(this));
   }
 
+  // ---- Start a run when the button is pressed ----
+  function startRun(scene) {
+    console.log("startRun");
+
+    // Reset run state
+    alive = true;
+    running = true;
+    survivalMs = 0;
+    brokeRecordThisRun = false;
+
+    deathText.setVisible(false);
+    newRecordText.setVisible(false);
+    newRecordText.setAlpha(1);
+
+    scoreText.setText("Score: 0.0");
+    timeText.setText("Time: 00:00");
+
+    // Clear obstacles from previous run (if any)
+    pipes.clear(true, true);
+
+    // Reset bird position & velocity
+    bird.setPosition(W * 0.2, H / 2);
+    bird.setVelocity(0, 0);
+
+    // Hide button while playing
+    startButton.setVisibleWithLabel(false);
+
+    // Notify server (reuse restart message as "start run")
+    socket.emit("player_restart");
+
+    // Play start sound
+    if (startSound) startSound.play();
+  }
+
   function update(time, delta) {
-    if (!alive) return;
+    if (!alive || !running) return;
 
     // Out of bounds
     if (bird.y > H || bird.y < 0) {
@@ -209,13 +312,15 @@ function startGame() {
 
     // Telemetry to server (throttled)
     if (time - lastSend > 66) {
-      socket.emit("player_state", { score, alive: true });
+      const secondsScore = Math.floor((survivalMs / 1000) * 10) / 10;
+      socket.emit("player_state", { score: secondsScore, alive: true });
       lastSend = time;
     }
   }
 
   function spawnPipes(scene) {
-    if (!alive) return;
+    // Only spawn while run is active
+    if (!alive || !running) return;
 
     const gap = 220;
     const margin = 140;
@@ -248,55 +353,25 @@ function startGame() {
   }
 
   function die(scene) {
-    if (!alive || restarting) return;
+    if (!alive || !running) return;
     alive = false;
-    restarting = true;
+    running = false;
 
     // score at death (seconds)
     const finalSeconds = survivalMs / 1000;
     const score = Math.floor(finalSeconds * 10) / 10;
 
-    // 🔊 Play game over sound once
+    // Play game over sound once
     if (gameOverSound) gameOverSound.play();
 
     socket.emit("player_state", { score, alive: false });
 
-    deathText.setText("You Died!");
+    deathText.setText("GAME OVER!");
     deathText.setVisible(true);
 
-    // Wait 3 seconds then restart
-    scene.time.delayedCall(3000, () => {
-      restart(scene);
-    });
-  }
-
-  function restart(scene) {
-    alive = true;
-    restarting = false;
-
-    // Reset survival time but keep bestSurvivalMs (highscore)
-    survivalMs = 0;
-    brokeRecordThisRun = false;
-
-    deathText.setVisible(false);
-    newRecordText.setVisible(false);
-    newRecordText.setAlpha(1);
-
-    scoreText.setText("Score: 0.0");
-    timeText.setText("Time: 00:00");
-    // highScoreText already shows best time
-
-    // Clear all pipes
-    pipes.clear(true, true);
-
-    // Reset bird
-    bird.setPosition(W * 0.2, H / 2);
-    bird.setVelocity(0, 0);
-
-    // 🔊 Play start sound again at the beginning of the new run
-    if (startSound) startSound.play();
-
-    socket.emit("player_restart");
+    // Show button again to allow manual restart
+    startButton.setLabelText("PLAY AGAIN");
+    startButton.setVisibleWithLabel(true);
   }
 
   // Helper: format ms -> mm:ss
