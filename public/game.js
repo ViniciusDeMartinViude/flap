@@ -30,7 +30,12 @@ function startGame() {
     physics: {
       default: "arcade",
       arcade: {
-        gravity: { y: 1200 }
+        gravity: { y: 1200 },
+        debug: true,
+        debugShowBody: false,        // ❌ no green rectangles
+        debugShowStaticBody: false,
+        debugShowBounds: false,
+        debugShowVelocity: true      // ✅ only pink velocity line
       }
     },
     scene: { preload, create, update }
@@ -49,22 +54,25 @@ function startGame() {
     timeText,
     deathText,
     newRecordText;
-   // tickSound;
+
+  // Sounds
+  let startSound, clickSound, gameOverSound;
 
   // Survival-based scoring
   let survivalMs = 0;       // current run, in milliseconds
   let bestSurvivalMs = 0;   // best run (highscore), in ms
   let brokeRecordThisRun = false;
-  let lastTickSecond = 0;
 
   function preload() {
     console.log("preload");
-    this.load.image("bg", "final_background.png");
-    this.load.image("bird", "fly2.png");
-    this.load.image("pipe", "minaret2.png");
+    this.load.image("bg", "background.png");
+    this.load.image("bird", "carpet.png");
+    this.load.image("pipe", "minarete.png");
 
-    // optional tick sound
-   // this.load.audio("tick", "tick.wav");
+    // 🎵 Sounds
+    this.load.audio("start", "arabian_dramatic_sting.wav"); // beginning of run
+    this.load.audio("click", "gameover.wav");                   // flap/click
+    this.load.audio("gameover", "gameover_retro_3s.wav");   // end game (3s)
   }
 
   function create() {
@@ -74,14 +82,17 @@ function startGame() {
     bg = this.add.image(W / 2, H / 2, "bg");
     bg.setDisplaySize(W, H);
 
-    // --- Bird & pipes ---
-    bird = this.physics.add
-      .sprite(W * 0.2, H / 2, "bird")
-      .setScale(0.7);
+    // --- Bird (carpet rider) ---
+    bird = this.physics.add.sprite(W * 0.2, H / 2, "bird");
+    bird.setScale(0.7);
+
+    // Tuned rectangular hitbox for carpet rider (img 200x139)
+    bird.body.setSize(140, 110);  // width, height
+    bird.body.setOffset(30, 15);  // x, y offset inside sprite
 
     pipes = this.physics.add.group();
 
-    // --- Current score (top-left): shows seconds with 1 decimal ---
+    // --- Current score (top-left): seconds with 1 decimal ---
     scoreText = this.add.text(24, 24, "Score: 0.0", {
       fontFamily: "Arial",
       fontSize: "32px",
@@ -131,13 +142,19 @@ function startGame() {
       .setOrigin(0.5)
       .setVisible(false);
 
-    // --- Tick sound setup ---
-   // tickSound = this.sound.add("tick");
+    // --- Setup sounds ---
+    startSound = this.sound.add("start");
+    clickSound = this.sound.add("click");
+    gameOverSound = this.sound.add("gameover");
 
-    // Input: click/tap to flap
+    // 🔊 Play start sound at the beginning of the run
+    if (startSound) startSound.play();
+
+    // Input: click/tap to flap + click sound
     this.input.on("pointerdown", () => {
       if (!alive) return; // ignore clicks when dead / waiting
       bird.setVelocityY(-380);
+      if (clickSound) clickSound.play();
     });
 
     // Pipe spawner
@@ -166,13 +183,6 @@ function startGame() {
 
     scoreText.setText("Score: " + score.toFixed(1));
     timeText.setText("Time: " + formatTime(survivalMs));
-
-    // Tick sound each full second (optional)
-    const currentSecInt = Math.floor(seconds);
-    if (currentSecInt > lastTickSecond) {
-      lastTickSecond = currentSecInt;
-      //if (tickSound) tickSound.play();
-    }
 
     // Highscore check (based on survival time)
     if (survivalMs > bestSurvivalMs) {
@@ -229,7 +239,12 @@ function startGame() {
     top.body.allowGravity = false;
     bot.body.allowGravity = false;
 
-    // NOTE: no scoring zone here anymore — scoring is purely survival time
+    // Slim hitbox for minaret (39 x 200 original)
+    top.body.setSize(24, 200);
+    top.body.setOffset(7, 0);
+
+    bot.body.setSize(24, 200);
+    bot.body.setOffset(7, 0);
   }
 
   function die(scene) {
@@ -240,6 +255,9 @@ function startGame() {
     // score at death (seconds)
     const finalSeconds = survivalMs / 1000;
     const score = Math.floor(finalSeconds * 10) / 10;
+
+    // 🔊 Play game over sound once
+    if (gameOverSound) gameOverSound.play();
 
     socket.emit("player_state", { score, alive: false });
 
@@ -259,7 +277,6 @@ function startGame() {
     // Reset survival time but keep bestSurvivalMs (highscore)
     survivalMs = 0;
     brokeRecordThisRun = false;
-    lastTickSecond = 0;
 
     deathText.setVisible(false);
     newRecordText.setVisible(false);
@@ -275,6 +292,9 @@ function startGame() {
     // Reset bird
     bird.setPosition(W * 0.2, H / 2);
     bird.setVelocity(0, 0);
+
+    // 🔊 Play start sound again at the beginning of the new run
+    if (startSound) startSound.play();
 
     socket.emit("player_restart");
   }
