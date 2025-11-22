@@ -1,16 +1,571 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>MultiFlappy — Spectator</title>
-  <link rel="stylesheet" href="/style.css"/>
+  <meta charset="UTF-8" />
+  <title>Magic Carpet Challenge – Spectator</title>
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      background: #000;
+      color: #fff;
+    }
+
+    body {
+      display: flex;
+      align-items: stretch;
+      justify-content: stretch;
+    }
+
+    .spec-root {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+
+    .spec-bg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: blur(4px) brightness(0.7);
+      transform: scale(1.05);
+    }
+
+    .spec-overlay {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      padding: 20px 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* JOIN OVERLAY (similar style to index join box) */
+    .spec-join {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      background: rgba(0, 0, 0, 0.82);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .spec-join-box {
+      background: rgba(0, 0, 0, 0.95);
+      border-radius: 24px;
+      border: 2px solid #ffcc33;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      width: min(90vw, 420px);
+      color: #fff;
+      text-align: center;
+      box-shadow: 0 0 38px rgba(0, 0, 0, 0.9);
+    }
+
+    .spec-join-box h1 {
+      font-size: 24px;
+      margin-bottom: 4px;
+    }
+
+    .spec-join-sub {
+      font-size: 13px;
+      opacity: 0.9;
+      line-height: 1.4;
+    }
+
+    .spec-join-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .spec-join-row input {
+      font-size: 20px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: none;
+      outline: none;
+      text-transform: uppercase;
+      width: 160px;
+      text-align: center;
+    }
+
+    .btn-primary {
+      padding: 10px 20px;
+      border-radius: 999px;
+      border: none;
+      outline: none;
+      background: linear-gradient(135deg, #007bff, #00c2ff);
+      color: #fff;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+      transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.1s ease;
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.8);
+      filter: brightness(1.08);
+    }
+    .btn-primary:active {
+      transform: translateY(1px);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+    }
+
+    /* HEADER */
+    .spec-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .spec-title {
+      font-size: 30px;
+      font-weight: bold;
+      text-shadow: 0 0 10px #000;
+      letter-spacing: 2px;
+    }
+
+    .spec-room-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 18px;
+      text-shadow: 0 0 8px #000;
+    }
+
+    .spec-room-badge {
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.55);
+      border: 2px solid #ffcc33;
+      font-weight: bold;
+      letter-spacing: 2px;
+    }
+
+    .spec-url {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      font-size: 14px;
+    }
+
+    /* MAIN */
+    .spec-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-top: 4px;
+    }
+
+    .spec-grid {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-auto-rows: 1fr;
+      gap: 16px;
+    }
+
+    .player-card {
+      position: relative;
+      background: rgba(0, 0, 0, 0.58);
+      border-radius: 24px;
+      padding: 16px 18px;
+      border: 2px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 8px 26px rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow: hidden;
+    }
+
+    .player-card.alive {
+      border-color: #00e676;
+      box-shadow: 0 0 18px rgba(0, 230, 118, 0.8);
+    }
+
+    .player-card.dead {
+      border-color: #ff5252;
+      opacity: 0.8;
+      filter: grayscale(0.2);
+    }
+
+    .player-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .player-avatar {
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      border: 3px solid #ffcc33;
+      background: radial-gradient(circle at 30% 30%, #ffe082, #ff6f00);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 22px;
+      color: #2b1900;
+      text-shadow: 0 0 6px rgba(0, 0, 0, 0.6);
+    }
+
+    .player-name {
+      font-size: 20px;
+      font-weight: bold;
+      text-shadow: 0 0 8px #000;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .player-status {
+      font-size: 13px;
+      opacity: 0.85;
+      margin-top: 2px;
+    }
+
+    .player-status span.alive {
+      color: #00e676;
+      font-weight: bold;
+    }
+
+    .player-status span.dead {
+      color: #ff5252;
+      font-weight: bold;
+    }
+
+    .player-body {
+      margin-top: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 16px;
+    }
+
+    .player-metric-label {
+      opacity: 0.8;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .player-metric-value {
+      font-size: 22px;
+      font-weight: bold;
+    }
+
+    .player-meter {
+      margin-top: 4px;
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+    }
+
+    .player-meter-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #00e676, #ffeb3b, #ff9100);
+      transition: width 0.2s ease-out;
+    }
+
+    .player-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      opacity: 0.9;
+      margin-top: 6px;
+    }
+
+    .badge-best {
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.7);
+      border: 1px solid #ffcc33;
+      font-size: 12px;
+    }
+
+    .badge-best span {
+      color: #ffeb3b;
+      font-weight: bold;
+    }
+
+    .spec-footer {
+      font-size: 13px;
+      opacity: 0.9;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      text-shadow: 0 0 6px #000;
+    }
+
+    @media (max-width: 1200px) {
+      .spec-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+  </style>
 </head>
 <body>
-  <div class="join">
-    <input id="room" placeholder="Room code to watch" />
-    <button id="watch">Watch</button>
+  <div class="spec-root">
+    <img src="background.png" alt="" class="spec-bg" />
+
+    <div class="spec-overlay">
+      <!-- JOIN OVERLAY -->
+      <div class="spec-join" id="joinOverlay">
+        <div class="spec-join-box">
+          <h1>Magic Carpet Challenge – Spectator</h1>
+          <div class="spec-join-sub">
+            Enter the room code to watch the players on the big screen.
+          </div>
+
+          <div class="spec-join-row">
+            <input id="roomInput" type="text" maxlength="6" placeholder="ROOM" />
+            <button class="btn-primary" id="joinBtn">Join</button>
+          </div>
+
+          <div class="spec-join-sub">
+            Players should open the game on their phones and use the same room code.
+          </div>
+        </div>
+      </div>
+
+      <!-- HEADER -->
+      <header class="spec-header">
+        <div class="spec-title">Magic Carpet Challenge – Spectator</div>
+        <div class="spec-room-info">
+          <div class="spec-room-badge" id="roomBadge">ROOM: ---</div>
+          <div class="spec-url">
+            Join on your phone:
+            <strong id="joinUrl">http://your-server/index.html</strong>
+          </div>
+        </div>
+      </header>
+
+      <!-- MAIN GRID -->
+      <main class="spec-main">
+        <div class="spec-grid" id="playersGrid">
+          <!-- Player cards will be rendered here -->
+        </div>
+      </main>
+
+      <!-- FOOTER -->
+      <footer class="spec-footer">
+        <span>🟢 ALIVE · 🔴 OUT · Score = survival time (seconds)</span>
+        <span>Up to 8 players · Designed for 16:9 TV</span>
+      </footer>
+    </div>
   </div>
-  <div id="grid" class="grid"></div>
-  <script src="/spectator.js"></script>
+
+  <script>
+    const socket = io();
+
+    const joinOverlay = document.getElementById("joinOverlay");
+    const joinBtn = document.getElementById("joinBtn");
+    const roomInput = document.getElementById("roomInput");
+    const roomBadge = document.getElementById("roomBadge");
+    const joinUrlEl = document.getElementById("joinUrl");
+    const playersGrid = document.getElementById("playersGrid");
+
+    let currentRoomCode = null;
+    let playersState = [];
+
+    // Show correct phone URL
+    joinUrlEl.textContent = window.location.origin + "/index.html";
+
+    joinBtn.onclick = () => {
+      const code = roomInput.value.trim().toUpperCase();
+      if (!code) return alert("Type a room code.");
+      joinAsScreen(code);
+    };
+
+    roomInput.addEventListener("keyup", (e) => {
+      if (e.key === "Enter") joinBtn.click();
+    });
+
+    function joinAsScreen(code) {
+      socket.emit("join_as_screen", { code }, (res) => {
+        if (!res || !res.ok) {
+          return alert(res?.error || "Unable to join room");
+        }
+        currentRoomCode = code;
+        roomBadge.textContent = "ROOM: " + code;
+        joinOverlay.style.display = "none";
+      });
+    }
+
+    // Receive state from server
+    socket.on("room_state", (payload) => {
+      if (!payload) return;
+      const { code, players } = payload;
+      if (code && !currentRoomCode) {
+        currentRoomCode = code;
+        roomBadge.textContent = "ROOM: " + code;
+        joinOverlay.style.display = "none";
+      }
+      playersState = players || [];
+      renderPlayers();
+    });
+
+    function renderPlayers() {
+      playersGrid.innerHTML = "";
+
+      // Sort players: bestScore desc, then current score desc
+      const sorted = [...playersState].sort((a, b) => {
+        const bestA = a.bestScore ?? 0;
+        const bestB = b.bestScore ?? 0;
+        if (bestB !== bestA) return bestB - bestA;
+        const curA = a.score ?? 0;
+        const curB = b.score ?? 0;
+        return curB - curA;
+      });
+
+      const maxPlayers = 8;
+      const slice = sorted.slice(0, maxPlayers);
+
+      const maxScore = slice.reduce((m, p) => Math.max(m, p.score ?? 0), 1);
+
+      slice.forEach((p) => {
+        const card = document.createElement("div");
+        card.className = "player-card " + (p.alive ? "alive" : "dead");
+
+        // Header
+        const header = document.createElement("div");
+        header.className = "player-header";
+
+        const avatar = document.createElement("div");
+        avatar.className = "player-avatar";
+        avatar.textContent = getInitials(p.name || "Player");
+
+        const headerTextBox = document.createElement("div");
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "player-name";
+        nameEl.textContent = p.name || "Unnamed";
+
+        const statusEl = document.createElement("div");
+        statusEl.className = "player-status";
+        const statusSpan = document.createElement("span");
+        if (p.alive) {
+          statusSpan.className = "alive";
+          statusSpan.textContent = "ALIVE";
+        } else {
+          statusSpan.className = "dead";
+          statusSpan.textContent = "OUT";
+        }
+        statusEl.append("Status: ", statusSpan);
+
+        headerTextBox.appendChild(nameEl);
+        headerTextBox.appendChild(statusEl);
+        header.appendChild(avatar);
+        header.appendChild(headerTextBox);
+
+        // Body
+        const body = document.createElement("div");
+        body.className = "player-body";
+
+        const labelScore = document.createElement("div");
+        labelScore.className = "player-metric-label";
+        labelScore.textContent = "Current score";
+
+        const valueScore = document.createElement("div");
+        valueScore.className = "player-metric-value";
+        const curScore = p.score ?? 0;
+        valueScore.textContent =
+          typeof curScore === "number" ? curScore.toFixed(1) : curScore;
+
+        const meter = document.createElement("div");
+        meter.className = "player-meter";
+        const bar = document.createElement("div");
+        bar.className = "player-meter-bar";
+        const ratio = Math.max(0, Math.min(1, (p.score ?? 0) / maxScore));
+        bar.style.width = (ratio * 100).toFixed(1) + "%";
+        meter.appendChild(bar);
+
+        const labelBest = document.createElement("div");
+        labelBest.className = "player-metric-label";
+        labelBest.textContent = "Best score";
+
+        const valueBest = document.createElement("div");
+        valueBest.className = "player-metric-value";
+        const bestScore = p.bestScore ?? 0;
+        valueBest.textContent =
+          typeof bestScore === "number" ? bestScore.toFixed(1) : bestScore;
+
+        body.appendChild(labelScore);
+        body.appendChild(valueScore);
+        body.appendChild(meter);
+        body.appendChild(labelBest);
+        body.appendChild(valueBest);
+
+        // Footer
+        const footer = document.createElement("div");
+        footer.className = "player-footer";
+
+        const badgeBest = document.createElement("div");
+        badgeBest.className = "badge-best";
+        badgeBest.innerHTML =
+          "Best: <span>" +
+          (typeof bestScore === "number" ? bestScore.toFixed(1) : bestScore) +
+          "</span>";
+
+        const legend = document.createElement("div");
+        legend.textContent = p.alive ? "Flying…" : "Waiting next run";
+
+        footer.appendChild(badgeBest);
+        footer.appendChild(legend);
+
+        card.appendChild(header);
+        card.appendChild(body);
+        card.appendChild(footer);
+
+        playersGrid.appendChild(card);
+      });
+
+      // Fill up to 8 slots with placeholders (optional)
+      for (let i = slice.length; i < maxPlayers; i++) {
+        const empty = document.createElement("div");
+        empty.className = "player-card";
+        empty.innerHTML =
+          "<div style='opacity:0.45;font-size:18px;text-align:center;margin:auto;'>Waiting for player…</div>";
+        playersGrid.appendChild(empty);
+      }
+    }
+
+    function getInitials(name) {
+      const parts = name.trim().split(/\s+/);
+      if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+      return (
+        parts[0].charAt(0).toUpperCase() +
+        parts[parts.length - 1].charAt(0).toUpperCase()
+      );
+    }
+  </script>
 </body>
 </html>

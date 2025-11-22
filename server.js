@@ -1,130 +1,168 @@
-// server.js
-import express from "express";
-import http from "http";
-import { Server } from "socket.io";
-import path from "path";
-import crypto from "crypto";
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+const path = require("path");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server);
 
-app.use(express.static(path.join(process.cwd(), "public")));
+// Serve everything inside /public
+app.use(express.static(path.join(__dirname, "public")));
 
-const ARENA_CAPACITY = 8;
+// Rooms storage
+const rooms = new Map();
 
-const rooms = new Map(); // roomCode -> { players: Map<socketId, player>, spectators: Set<socketId> }
 function getOrCreateRoom(code) {
-  if (!rooms.has(code)) rooms.set(code, { players: new Map(), spectators: new Set() });
+  if (!rooms.has(code)) {
+    rooms.set(code, {
+      players: new Map(),
+      screens: new Set(),
+    });
+  }
   return rooms.get(code);
 }
 
-function makeRoomCode() {
-  return crypto.randomBytes(3).toString("hex").toUpperCase(); // e.g., "A3F91B"
+function broadcastRoomState(code) {
+  const room = rooms.get(code);
+  if (!room) return;
+
+  const players = [];
+  for (const [id, p] of room.players.entries()) {
+    players.push({
+      id,
+      name: p.name,
+      score: p.score || 0,
+      bestScore: p.bestScore || 0,
+      alive: p.alive,
+    });
+  }
+
+  io.to(code).emit("room_state", { code, players });
 }
 
 io.on("connection", (socket) => {
-  let roomCode = null;
+  console.log("Connected:", socket.id);
 
-  socket.on("create_room", (_, cb) => {
-    roomCode = makeRoomCode();
-    getOrCreateRoom(roomCode);
-    cb({ roomCode });
-  });
+  socket.data = {
+    roomCode: null,
+    isPlayer: false,
+    isScreen: false
+  };
 
-  socket.on("join_as_player", ({ code, name }, cb) => {
-    roomCode = code;
-    const room = getOrCreateRoom(roomCode);
-    if (room.players.size >= ARENA_CAPACITY) return cb({ ok: false, error: "Room full" });
+  // ---- Player joins ----
+  socket.on("join_as_player", (data, cb) => {
+    const code = (data.code || "").trim().toUpperCase();
+    const name = (data.name || "").trim() || "Player";
 
-    const slot = [...Array(ARENA_CAPACITY).keys()].find(
-      i => ![...room.players.values()].some(p => p.slot === i)
-    );
+    if (!code) return cb?.({ ok: false, error: "Room code required" });
 
-    const player = {
-      id: socket.id,
-      name: (name || "Player").slice(0, 16),
-      slot,
+    const room = getOrCreateRoom(code);
+
+    room.players.set(socket.id, {
+      name,
       score: 0,
-      alive: true,
-      lastUpdate: Date.now()
-    };
-
-    room.players.set(socket.id, player);
-    socket.join(roomCode);
-    cb({ ok: true, slot });
-    io.to(roomCode).emit("roster", serializeRoster(room));
-  });
-
-  socket.on("join_as_spectator", ({ code }, cb) => {
-    roomCode = code;
-    const room = getOrCreateRoom(roomCode);
-    room.spectators.add(socket.id);
-    socket.join(roomCode);
-    cb({ ok: true, capacity: ARENA_CAPACITY });
-    socket.emit("roster", serializeRoster(room));
-  });
-
-  // From clients: small, throttled state packets
-  socket.on("player_state", ({ score, alive, frame }) => {
-    if (!roomCode) return;
-    const room = rooms.get(roomCode);
-    if (!room) return;
-    const p = room.players.get(socket.id);
-    if (!p) return;
-
-    p.score = Math.max(0, Math.floor(score || 0));
-    p.alive = !!alive;
-    p.lastUpdate = Date.now();
-
-    // Echo minimal state to spectators only (players don't need others' exact physics)
-    io.to(roomCode).emit("spectator_state", {
-      id: socket.id,
-      slot: p.slot,
-      score: p.score,
-      alive: p.alive,
-      frame: frame || null
+      bestScore: 0,
+      alive: true
     });
+
+    socket.join(code);
+    socket.data.roomCode = code;
+    socket.data.isPlayer = true;
+
+    console.log("Player joined:", name, "room:", code);
+
+    cb?.({ ok: true });
+    broadcastRoomState(code);
   });
 
-  socket.on("player_restart", () => {
-    if (!roomCode) return;
-    const room = rooms.get(roomCode);
-    const p = room?.players.get(socket.id);
-    if (!p) return;
-    p.alive = true;
-    p.score = 0;
-    io.to(roomCode).emit("roster", serializeRoster(room));
+  // ---- Spectator joins ----
+  socket.on("join_as_screen", (data, cb) => {
+    const code = (data.code || "").trim().toUpperCase();
+    if (!code) return cb?.({ ok: false, error: "Room code required" });
+
+    const room = getOrCreateRoom(code);
+
+    room.screens.add(socket.id);
+    socket.join(code);
+
+    socket.data.roomCode = code;
+    socket.data.isScreen = true;
+
+    console.log("Screen joined room:", code);
+
+    cb?.({ ok: true });
+    broadcastRoomState(code);
   });
 
-  socket.on("disconnect", () => {
-    if (!roomCode) return;
-    const room = rooms.get(roomCode);
+  // ---- Player sends updates ----
+  socket.on("player_state", (data) => {
+    const code = socket.data.roomCode;
+    if (!code) return;
+
+    const room = rooms.get(code);
     if (!room) return;
 
-    if (room.players.has(socket.id)) room.players.delete(socket.id);
-    if (room.spectators.has(socket.id)) room.spectators.delete(socket.id);
+    const player = room.players.get(socket.id);
+    if (!player) return;
 
-    if (room.players.size === 0 && room.spectators.size === 0) {
-      rooms.delete(roomCode);
-    } else {
-      io.to(roomCode).emit("roster", serializeRoster(room));
+    if (typeof data.score === "number") {
+      player.score = data.score;
+      if (data.score > player.bestScore) {
+        player.bestScore = data.score;
+      }
     }
+
+    if (typeof data.alive === "boolean") {
+      player.alive = data.alive;
+    }
+
+    broadcastRoomState(code);
+  });
+
+  // ---- Player restarts ----
+  socket.on("player_restart", () => {
+    const code = socket.data.roomCode;
+    if (!code) return;
+
+    const room = rooms.get(code);
+    if (!room) return;
+
+    const player = room.players.get(socket.id);
+    if (!player) return;
+
+    player.score = 0;
+    player.alive = true;
+
+    broadcastRoomState(code);
+  });
+
+  // ---- Disconnect ----
+  socket.on("disconnect", () => {
+    const code = socket.data.roomCode;
+    if (!code) return;
+
+    const room = rooms.get(code);
+    if (!room) return;
+
+    if (socket.data.isPlayer) {
+      room.players.delete(socket.id);
+    }
+    if (socket.data.isScreen) {
+      room.screens.delete(socket.id);
+    }
+
+    if (room.players.size === 0 && room.screens.size === 0) {
+      rooms.delete(code);
+    } else {
+      broadcastRoomState(code);
+    }
+
+    console.log("Disconnected:", socket.id);
   });
 });
 
-function serializeRoster(room) {
-  return {
-    capacity: ARENA_CAPACITY,
-    players: [...room.players.values()].map(p => ({
-      id: p.id,
-      name: p.name,
-      slot: p.slot,
-      score: p.score,
-      alive: p.alive
-    }))
-  };
-}
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Server listening on", PORT));
+server.listen(3000, () => {
+  console.log("🚀 Server running at:");
+  console.log("👉 http://localhost:3000/");
+});

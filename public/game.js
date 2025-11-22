@@ -19,24 +19,31 @@ document.getElementById("join").onclick = () => {
 function startGame() {
   console.log("startGame called");
 
-  // 16:9 desktop resolution
-  const W = 1280, H = 720;
+  // Base logical resolution (16:9) – will be scaled
+  const W = 1280;
+  const H = 720;
 
   const config = {
     type: Phaser.AUTO,
     width: W,
     height: H,
-    parent: "game", // <div id="game"></div> in your HTML
+    parent: "game", // <div id="game"></div>
+    backgroundColor: "#000000",
     physics: {
       default: "arcade",
       arcade: {
         gravity: { y: 1200 },
-        debug: false,
-        debugShowBody: false,        // no green rectangles
+        debug: false,              // off for mobile
+        debugShowBody: false,
         debugShowStaticBody: false,
         debugShowBounds: false,
-        debugShowVelocity: false      // only pink velocity line
+        debugShowVelocity: false
       }
+    },
+    scale: {
+      mode: Phaser.Scale.FIT,
+      autoCenter: Phaser.Scale.CENTER_BOTH,
+      resizeInterval: 100
     },
     scene: { preload, create, update }
   };
@@ -45,8 +52,8 @@ function startGame() {
 
   let bird,
     pipes,
-    alive = false,        // starts false until you press Start
-    running = false,      // game is not running until Start is pressed
+    alive = false,        // starts false until Start pressed
+    running = false,
     lastSend = 0,
     bg,
     scoreText,
@@ -60,8 +67,8 @@ function startGame() {
   let startSound, clickSound, gameOverSound;
 
   // Survival-based scoring
-  let survivalMs = 0;       // current run, in milliseconds
-  let bestSurvivalMs = 0;   // best run (highscore), in ms
+  let survivalMs = 0;
+  let bestSurvivalMs = 0;
   let brokeRecordThisRun = false;
 
   // ---------- Rounded button helper ----------
@@ -97,7 +104,7 @@ function startGame() {
     button.bgColor = bgColor;
     button.bgHover = bgHover;
 
-    // Hover effect
+    // Hover effect (on desktop mostly)
     button.on("pointerover", () => {
       button.setTint(bgHover);
     });
@@ -111,7 +118,6 @@ function startGame() {
     // Helper to change text later (e.g., "PLAY AGAIN")
     button.setLabelText = (newText) => {
       button.label.setText(newText);
-      // keep centered on the button
       button.label.setPosition(button.x, button.y);
     };
 
@@ -131,9 +137,9 @@ function startGame() {
     this.load.image("pipe", "minarete.png");
 
     // Sounds
-    this.load.audio("start", "arabian_dramatic_sting.wav"); // beginning of run
-    this.load.audio("click", "tick.wav");                   // flap/click
-    this.load.audio("gameover", "gameover_retro_3s.wav");   // end game (3s)
+    this.load.audio("start", "arabian_dramatic_sting.wav");
+    this.load.audio("click", "tick.wav");
+    this.load.audio("gameover", "gameover_retro_3s.wav");
   }
 
   function create() {
@@ -182,7 +188,7 @@ function startGame() {
     }).setOrigin(0.5, 0);
 
     // --- Death message (center) ---
-    deathText = this.add.text(W / 2, H / 2 - 60, "GAME OVER!", {
+    deathText = this.add.text(W / 2, H / 2 - 60, "Game Over!", {
       fontFamily: "Arial",
       fontSize: "64px",
       color: "#ff3333",
@@ -215,12 +221,21 @@ function startGame() {
       H / 2 + 40,
       "START",
       () => {
-        if (!running) startRun(this);
+        if (!running) {
+          // Try to go fullscreen on mobile (must be inside user gesture)
+          if (!this.scale.isFullscreen) {
+            this.scale.startFullscreen();
+          }
+          startRun(this);
+        }
       }
     );
 
     // Input: click/tap to flap + click sound (only when in a run)
-    this.input.on("pointerdown", () => {
+    this.input.on("pointerdown", (pointer, objects) => {
+      // If the tap hits the button, let button handle it
+      if (objects && objects.length > 0) return;
+
       if (!alive || !running) return; // ignore clicks when not in a run
       bird.setVelocityY(-380);
       if (clickSound) clickSound.play();
@@ -366,7 +381,7 @@ function startGame() {
 
     socket.emit("player_state", { score, alive: false });
 
-    deathText.setText("GAME OVER!");
+    deathText.setText("Game Over!");
     deathText.setVisible(true);
 
     // Show button again to allow manual restart
